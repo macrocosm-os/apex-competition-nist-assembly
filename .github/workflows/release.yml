@@ -1,15 +1,14 @@
-# RELEASE WORKFLOW — builds, keyless-signs (cosign/OIDC), and pushes the hello_world
-# player + referee images.
+# RELEASE WORKFLOW: builds, pushes, and keyless-signs (cosign / GitHub OIDC) the player and
+# referee images for unarbos/apex-competition-nist-assembly.
 #
-# The spec's `signature.cosign_identity` points at THIS file's path, so keep the path
-# `.github/workflows/release.yml` and the repo name stable — changing either breaks the
-# platform's signature verification at sync time.
+# spec.yaml `signature.cosign_identity` points at THIS file's path. Keep the path
+# `.github/workflows/release.yml` and the repo name stable, or signature verification breaks.
 #
-# The images vendor `gym_v1` (`player/gym_v1/`, `referee/gym_v1/`) and build FROM
-# python:3.12-slim, so this workflow is self-contained — no base image or PyPI dependency.
-# It is unverified in CI; run it on a tag once and confirm the Actions log before relying
-# on it. REMAINING TODO after the first successful run: copy the pushed image digests into
-# spec.yaml (`image.digest` and `referee.image.digest`), which are placeholder zeros today.
+# Required repository secret:
+#   NIST_HELDOUT_SEED  referee build input (BuildKit secret mount; never written to the repo or logs).
+#
+# Outputs: each image's pushed digest is uploaded as an artifact (digest-player / digest-referee)
+# and written to the job summary. Copy both into spec.yaml (`image.digest`, `referee.image.digest`).
 name: release
 
 on:
@@ -29,6 +28,9 @@ jobs:
         include:
           - { name: player,  dockerfile: player/Dockerfile }
           - { name: referee, dockerfile: referee/Dockerfile }
+    env:
+      IMAGE: ghcr.io/unarbos/apex-competition-nist-assembly-${{ matrix.name }}
+      DOCKER_BUILDKIT: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -37,13 +39,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@v3
+      - name: Check referee build secret
+        if: matrix.name == 'referee'
+        env:
+          NIST_HELDOUT_SEED: ${{ secrets.NIST_HELDOUT_SEED }}
+        run: |
+          if [ -z "$NIST_HELDOUT_SEED" ]; then echo "::error::secret NIST_HELDOUT_SEED is not set"; exit 1; fi
       - name: Build and push
         id: build
+        env:
+          NIST_HELDOUT_SEED: ${{ secrets.NIST_HELDOUT_SEED }}
         run: |
-          IMAGE=ghcr.io/macrocosm-os/apex-competition-hello-world-${{ matrix.name }}
-          docker build -f ${{ matrix.dockerfile }} -t "$IMAGE:${{ github.ref_name }}" .
+          SECRET_ARGS=""
+          if [ "${{ matrix.name }}" = "referee" ]; then SECRET_ARGS="--secret id=heldout_seed,env=NIST_HELDOUT_SEED"; fi
+          docker build $SECRET_ARGS -f ${{ matrix.dockerfile }} -t "$IMAGE:${{ github.ref_name }}" .
           docker push "$IMAGE:${{ github.ref_name }}"
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:${{ github.ref_name }}")
-          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          REF=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:${{ github.ref_name }}")
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "${REF#*@}" > digest-${{ matrix.name }}.txt
+          echo "${{ matrix.name }}: \`$REF\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Sign (keyless)
-        run: cosign sign --yes "${{ steps.build.outputs.digest }}"
+        run: cosign sign --yes "${{ steps.build.outputs.ref }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.name }}
+          path: digest-${{ matrix.name }}.txt

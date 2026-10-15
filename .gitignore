@@ -1,8 +1,7 @@
+out/
 __pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-.DS_Store
-/data/
-/out/
+*.pyc
+.pytest_cache/
+test_policies/*.onnx
+baselines/*.onnx
+referee/nist_sim/reserved.json

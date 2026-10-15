@@ -1,65 +1,59 @@
 schema: apex.competition.v1
-id: hello_world
+id: nist_lite_assembly
 version: 0.1.0
-display_name: "Hello World"
+display_name: "NIST-Lite Robot Assembly (RL)"
 kind: solo
 process_type: cpu
 
+# Same limits for player and referee sandboxes. 2 CPU / 2Gi fits the stage ceiling.
 resources:
-  cpu_limit: 1
-  mem_limit: 512Mi
+  cpu_limit: 2
+  mem_limit: 2Gi
   gpu_count: 0
 
-# `image` is the PLAYER image (the miner submission server), built by .github/workflows/release.yml
-# from player/Dockerfile and pushed to GHCR.
-#
-# TODO (placeholder digests): the digests below are zeros. After the first tagged release run,
-# copy the pushed digests from the Actions log into `image.digest` and `referee.image.digest` —
-# the platform pins by digest and rejects tags, so a spec with zeros will not sync.
+# PLAYER image: serves the miner's ONNX policy over gym_v1 (player/Dockerfile).
+# TODO: replace the placeholder digest with the pushed digest from the first tagged release.
 image:
-  ref: ghcr.io/macrocosm-os/apex-competition-hello-world-player
+  ref: ghcr.io/unarbos/apex-competition-nist-assembly-player
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 submission:
-  artifact_type: code
-  max_size_mb: 1
-  target_path: /app/submission.py
+  artifact_type: onnx
+  max_size_mb: 50
+  target_path: /app/policy.onnx
 
-screening:            # Layer-1 generic screener config (code artifact_type -> ASTGuard)
-  max_size_mb: 1
-  extra_forbidden_modules: [socket, subprocess]
+screening:
+  max_size_mb: 50
+  min_weight_bytes: 256
+
 input_schema:
   $ref: ./input.schema.json
 
 defaults:
   baseline_score: 0.0
-  baseline_raw_score: 0.0
-  round_length_in_days: 1
-  submission_reveal_days: 1
+  baseline_raw_score: 0.10
+  round_length_in_days: 2
+  submission_reveal_days: 4
   lower_is_better: false
 
 entrypoints:
-  # A solo eval is a 1-player duel. `evaluate` runs the PLAYER sandbox: the miner submission
-  # is mounted at target_path and served as an HTTP API that the referee drives.
   evaluate:
     command: ["python", "/app/launch.py", "--port", "8000"]
-    network_disabled: false   # the referee must reach the player on the per-job network
+    network_disabled: false
     allow_internet: false
-    timeout_s: 120
+    timeout_s: 900
     http_api:
       port: 8000
       readiness_path: /health
       protocol: gym_v1
 
-# The competition-owned scorer sandbox (holds the game engine + scoring). Runs /app/referee.py,
-# drives the player over the network, and writes /data/result.json. Isolated from the submission.
 referee:
   protocol: gym_v1
   image:
-    ref: ghcr.io/macrocosm-os/apex-competition-hello-world-referee
+    ref: ghcr.io/unarbos/apex-competition-nist-assembly-referee
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  timeout_s: 120
+  timeout_s: 900
 
 signature:
-  cosign_identity: https://github.com/macrocosm-os/apex-competition-hello-world/.github/workflows/release.yml
+  cosign_identity: https://github.com/unarbos/apex-competition-nist-assembly/.github/workflows/release.yml
   cosign_issuer: https://token.actions.githubusercontent.com

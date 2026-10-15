@@ -1,123 +1,77 @@
-# hello_world — the worked example Apex competition
+# NIST Assembly (NIST-Lite): an Apex competition
 
-The minimal end-to-end [Apex](https://macrocosmos.ai) competition: a complete, buildable
-`apex.competition.v1` competition in as few moving parts as possible. **Fork this repo as the
-starting point for your own competition.**
+Train a policy that lets a 2-finger gripper assemble pegs into the NIST Assembly Task Board #1
+pattern in simulation, and get credit **only for a completed assembly**. This is the setup popularized by
+AlphaNIST (binary task reward, diverse start states). Train any way you like: RL with
+success-guided sampling, imitation, scripted teachers plus distillation. Submit the resulting policy as
+an ONNX file.
 
-The task is deliberately trivial — sort a list of numbers — so that nothing distracts from the
-*structure*: a spec, a player image, a referee image, and a release workflow that signs both.
+> Status: v0.1.0, pending Apex onboarding (not live yet).
 
-- **Submission format:** `code` — a `submission.py` exposing `sort_numbers(numbers)`.
-- **Score:** `raw_score` = fraction of tasks sorted correctly, **higher is better**.
-- **Baseline:** `player/submission.py` (a one-line `sorted()`), which scores 1.0.
+## The task
 
-> This is a teaching example, not a live competition. The image digests in `spec.yaml` are
-> placeholder zeros and it is not registered on the platform.
+- **Parts:** round and square pegs in the four NIST ATB-1 sizes (4, 8, 12, 16 mm), each with its
+  matching 20 mm-deep hole. Radial clearance is a fraction of a millimetre.
+- **Robot:** a parallel 2-finger gripper on a Cartesian stage (x, y, z, yaw). Control runs at 25 Hz and physics at 1 kHz.
+- **Start states** (equal share of each, every round): part already grasped above the hole; grasped
+  and far from the hole; grasped and resting on the hole rim; standing loose on the board; lying on
+  its side on the board.
+- **Success (the only thing scored):** within 10 s the part is seated within 1 mm of the
+  fully-inserted pose, inside the hole, and the gripper has let go and is clear of the part (fingertips above its top
+  face), held for 5 consecutive control steps.
+- **Score:** `raw_score` = fraction of the round's episodes that end assembled. Higher is better.
+  Each round has 640 episodes (40 shape × size × start-type strata × 16).
+- Each round redraws the physical conditions: clearance, friction, part mass, controller stiffness,
+  sensor noise, hole placement, and start offsets. A policy has to be robust to all of them.
 
-## What's in here
+## Policy interface
 
-| Path | What it is |
-|------|-----------|
-| `spec.yaml` | The competition: kind, resources, submission contract, screening, entrypoints, images, cosign identity. |
-| `input.schema.json` | JSON Schema for the round input, `$ref`'d from the spec. |
-| `fixtures/input.json` | A round-input fixture to validate against the schema. |
-| `player/Dockerfile`, `player/launch.py` | The **player** image: serves the miner's submission over the gym_v1 HTTP API. |
-| `player/submission.py` | The reference (baseline) submission. Not baked into the image — the platform writes the miner's version to `/app/submission.py` at run time. |
-| `referee/Dockerfile`, `referee/referee.py` | The **referee** image: holds the ground truth, drives the player, writes `/data/result.json`. |
-| `player/gym_v1/`, `referee/gym_v1/` | **Vendored** copy of the toolkit's `gym_v1` package (see below). |
-| `.github/workflows/release.yml` | Builds, pushes by digest, and keyless-signs both images on a `v*` tag. |
+One ONNX file (opset 13–21, standard operators only, a single self-contained file, ≤ 50 MB):
 
-## The vendored `gym_v1` — this is the pattern to copy
+| | shape | contents |
+|---|---|---|
+| input | `[B, 26]` float32 | `[0:3]` gripper pos − hole (×10, m) · `[3:5]` sin/cos gripper yaw · `[5:8]` gripper velocity · `[8]` finger gap (×50) · `[9:12]` part pos − hole top centre (×10) · `[12:16]` part quaternion (w,x,y,z) · `[16:19]` part velocity · `[19]` part width (×50, m) · `[20]` 1 if square · `[21:26]` previous action |
+| output | `[B, 5]` float32 in [−1, 1] | `dx, dy, dz` (±4 mm/step), `dyaw` (±0.08 rad/step), gripper (+1 open, −1 close) |
 
-Both images **vendor** the toolkit's `gym_v1/` package into this repo and build on
-`FROM python:3.12-slim`:
+The batch dimension must be dynamic. Each control step is one call covering every episode still running,
+with a 500 ms deadline per call. An action that isn't a finite 5-vector ends that episode
+unsuccessfully. A call that errors or misses the deadline ends every episode still running.
 
-```dockerfile
-FROM python:3.12-slim
-COPY player/gym_v1/ /app/gym_v1/     # <- the vendored gym_v1
-COPY player/launch.py /app/launch.py
-```
-
-```python
-from gym_v1.player import Player, serve                    # not apex_sdk.gym_v1
-from gym_v1.referee import Referee, GameResult, RefereeContext
-from gym_v1.client import PlayerClient, PlayerError
-```
-
-**Do not build `FROM apex-player-base` / `apex-referee-base`.** Those base images ship the toolkit
-as `apex_sdk.gym_v1`, but they are not published to any registry — the build only resolves on a
-machine that has `docker build`-ed the base locally, so it **fails in release CI**. Build-FROM-base
-is the intended future once the bases are published; vendoring is what works today and what every
-shipped competition does.
-
-The vendored files carry a provenance header naming the toolkit version they came from. Don't
-hand-edit them — to update, re-copy from
-[apex-competitions-builder](https://github.com/macrocosm-os/apex-competitions-builder) `src/apex_sdk/gym_v1/`
-and rewrite the `apex_sdk.gym_v1` import root to `gym_v1`:
+## Iterate locally
 
 ```bash
-BUILDER=../apex-competitions-builder
-for side in player referee; do
-  for f in __init__ client player referee; do
-    sed 's/^from apex_sdk\.gym_v1\./from gym_v1./' "$BUILDER/src/apex_sdk/gym_v1/$f.py" > "$side/gym_v1/$f.py"
-  done
-done
+pip install numpy==2.5.4 mujoco==3.16.0 onnx==1.23.2 onnxruntime==1.31.0
+python tools/make_policies.py                       # builds baselines/baseline.onnx
+python tools/local_run.py --policy baselines/baseline.onnx --seed 1
+python tools/read_records.py out/history            # per-task / per-start-type breakdown
 ```
 
-## Validate and run locally
+The reference baseline (`baselines/baseline.onnx`, a hand-written servo) scores ~0.34. It never
+grasps loose or lying parts. To train, import `referee/nist_sim` directly (`pip install -r referee/requirements.txt`). `Episode(cond).step(action)`
+is the exact simulator used for scoring, and `nist_sim.conditions.sample_episodes(seed, k)` draws
+start states and conditions.
+
+### Exact Docker loop (the same contract the platform runs)
 
 ```bash
-pip install apex-competition-sdk        # or: pip install -e ../apex-competitions-builder
-
-# 1. Validate the spec + input fixture against apex.competition.v1. No Docker.
-apex-dev preflight --spec ./spec.yaml --input fixtures/input.json
-
-# 2. Preview the resolved execution plan (player + referee images, protocol, resources).
-apex-dev run --spec ./spec.yaml --input fixtures/input.json \
-             --submission ./player/submission.py --dockerfile ./player/Dockerfile
+docker build -f player/Dockerfile  -t nist-assembly-player  .
+docker build -f referee/Dockerfile -t nist-assembly-referee .
+docker network create nist-net
+docker run -d --name nist-player --network nist-net --cpus 2 --memory 2g \
+  -v "$PWD/baselines/baseline.onnx:/app/policy.onnx:ro" nist-assembly-player
+docker run --rm --network nist-net --cpus 2 --memory 2g \
+  -e MATCH_ID=local -e SEED=1 -e NUM_PLAYERS=1 -e PLAYER_URLS=http://nist-player:8000 \
+  -e CONFIG_JSON="$(cat fixtures/input.json)" -v "$PWD/out:/data" nist-assembly-referee
+cat out/result.json; docker rm -f nist-player; docker network rm nist-net
 ```
 
-`apex-dev run` prints the plan and exits 3: referee-driven local execution (both sandboxes on a
-shared network) is not implemented in the toolkit yet. Until it is, exercise the full loop by hand —
-which is also the honest test of the sandboxed leg, since it runs the player with egress blocked
-and the spec's resource limits:
+## Layout
 
-```bash
-# Build both images (build context = this repo root).
-docker build -f player/Dockerfile  -t hello-world-player  .
-docker build -f referee/Dockerfile -t hello-world-referee .
-
-docker network create hello-net
-
-# Player: submission mounted at target_path, no egress, spec resource limits.
-docker run -d --name hello-player --network hello-net \
-  --cpus 1 --memory 512m \
-  -v "$PWD/player/submission.py:/app/submission.py:ro" \
-  hello-world-player
-
-# Referee: the platform injects these env vars and reads /data/result.json.
-docker run --rm --network hello-net \
-  -e MATCH_ID=local -e SEED=0 -e NUM_PLAYERS=1 \
-  -e PLAYER_URLS='http://hello-player:8000' \
-  -e CONFIG_JSON="$(cat fixtures/input.json)" \
-  -v "$PWD/out:/data" \
-  hello-world-referee
-
-cat out/result.json     # -> {"raw_scores": [1.0], "winner": 0, "terminal_reason": "scored", ...}
-
-docker rm -f hello-player && docker network rm hello-net
-```
-
-## Ship it
-
-1. Tag a release (`git tag v0.1.0 && git push --tags`) — `release.yml` builds, pushes, and
-   keyless-signs both images.
-2. Copy the pushed digests from the Actions log into `spec.yaml` (`image.digest` and
-   `referee.image.digest`).
-3. Open a [Competition onboarding issue](https://github.com/macrocosm-os/apex-competitions-builder/issues/new?template=competition-onboarding.yml)
-   with your repo URL, released tag, image refs + digests, and a filled `HANDOFF.md`. A
-   Macrocosmos maintainer copies your `spec.yaml` into the private registry and activates it on
-   stage, then prod.
-
-Full authoring guide, the spec schema, and the design skill:
-[macrocosm-os/apex-competitions-builder](https://github.com/macrocosm-os/apex-competitions-builder).
+| Path | What |
+|---|---|
+| `spec.yaml`, `input.schema.json`, `fixtures/input.json` | The competition spec (`apex.competition.v1`) and round input |
+| `player/` | Player image: loads `/app/policy.onnx` and serves it over gym_v1 (vendored `gym_v1/`) |
+| `referee/` | Referee image: `nist_sim/` MuJoCo simulation plus `referee.py` scoring (vendored `gym_v1/`) |
+| `baselines/`, `test_policies/` | Reference policy and test-set policies (built by `tools/make_policies.py`, `tools/make_overfit.py`) |
+| `tools/` | `local_run.py`, `read_records.py`, `make_policies.py` |
+| `tests/` | Integration tests (`pytest -q tests/`) |
