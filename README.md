@@ -6,7 +6,7 @@ AlphaNIST (binary task reward, diverse start states). Train any way you like: RL
 success-guided sampling, imitation, scripted teachers plus distillation. Submit the resulting policy as
 an ONNX file.
 
-> Status: v0.1.0, pending Apex onboarding (not live yet).
+> Status: v0.1.1, pending Apex onboarding (not live yet).
 
 ## The task
 
