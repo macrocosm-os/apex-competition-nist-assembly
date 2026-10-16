@@ -68,7 +68,13 @@ def test_part_lying_across_hole_is_not_assembled(c):
     assert not e.success, e.terminal_reason
 
 
-@pytest.mark.parametrize("c", LYING_ACCEPTED_BY_POSITION, ids=lambda c: f"{c.shape}_{round(c.diameter * 1000)}mm")
+# Within those, the pose physically settles and scores for every part except the 8 mm round peg,
+# which keeps moving on the mouth of its hole. The control below runs on the cases where the
+# position-only predicate really did pay out.
+LYING_EXPLOITABLE = [c for c in LYING_ACCEPTED_BY_POSITION if not (c.shape == "round" and round(c.diameter * 1000) == 8)]
+
+
+@pytest.mark.parametrize("c", LYING_EXPLOITABLE, ids=lambda c: f"{c.shape}_{round(c.diameter * 1000)}mm")
 def test_only_the_upright_check_rejects_lying_across(c, monkeypatch):
     # With the upright check disabled the same pose must count as assembled; otherwise the test
     # above would pass for an unrelated reason (the part rolling off, an unstable step, ...).
