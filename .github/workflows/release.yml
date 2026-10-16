@@ -1,5 +1,5 @@
 # RELEASE WORKFLOW: builds, pushes, and keyless-signs (cosign / GitHub OIDC) the player and
-# referee images for unarbos/apex-competition-nist-assembly.
+# referee images for this repository (ghcr.io/<owner>/apex-competition-nist-assembly-*).
 #
 # spec.yaml `signature.cosign_identity` points at THIS file's path. Keep the path
 # `.github/workflows/release.yml` and the repo name stable, or signature verification breaks.
@@ -21,7 +21,11 @@ permissions:
   id-token: write            # required for keyless cosign signing
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   images:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -29,7 +33,7 @@ jobs:
           - { name: player,  dockerfile: player/Dockerfile }
           - { name: referee, dockerfile: referee/Dockerfile }
     env:
-      IMAGE: ghcr.io/unarbos/apex-competition-nist-assembly-${{ matrix.name }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/apex-competition-nist-assembly-${{ matrix.name }}
       DOCKER_BUILDKIT: "1"
     steps:
       - uses: actions/checkout@v4
