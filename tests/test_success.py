@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "referee"))
 import mujoco  # noqa: E402
 from nist_sim.conditions import sample_episodes  # noqa: E402
-from nist_sim.env import BLOCK_H, PEG_LEN, Episode  # noqa: E402
+from nist_sim.env import BLOCK_H, PEG_LEN, SEAT_TOL_Z, Episode  # noqa: E402
 
 OPEN_AND_HOLD = np.array([0, 0, 0, 0, 1.0])
 
@@ -47,14 +47,39 @@ def _hold(e: Episode, steps: int = 15) -> None:
             break
 
 
-@pytest.mark.parametrize("c", _one_per_part(), ids=lambda c: f"{c.shape}_{round(c.diameter * 1000)}mm")
-def test_part_lying_across_hole_is_not_assembled(c):
+def _lying_across(c) -> Episode:
     e = Episode(c, np.random.default_rng(0))
     hx, hy = c.hole_xy
     # On its side, centred over the hole, resting on the block's top face.
     _place(e, [hx, hy, BLOCK_H + c.diameter / 2 + 2e-4], [math.cos(math.pi / 4), math.sin(math.pi / 4), 0, 0])
+    return e
+
+
+# Lying across the mouth puts the part's centre at BLOCK_H + r, i.e. its "bottom" (centre - PEG_LEN/2)
+# at r - 5 mm: within the 1 mm seat tolerance for every part up to 12 mm. Those are the cases the
+# position-only predicate accepted.
+LYING_ACCEPTED_BY_POSITION = [c for c in _one_per_part() if c.diameter / 2 - (PEG_LEN / 2 - BLOCK_H) <= SEAT_TOL_Z]
+
+
+@pytest.mark.parametrize("c", LYING_ACCEPTED_BY_POSITION, ids=lambda c: f"{c.shape}_{round(c.diameter * 1000)}mm")
+def test_part_lying_across_hole_is_not_assembled(c):
+    e = _lying_across(c)
     _hold(e)
     assert not e.success, e.terminal_reason
+
+
+@pytest.mark.parametrize("c", LYING_ACCEPTED_BY_POSITION, ids=lambda c: f"{c.shape}_{round(c.diameter * 1000)}mm")
+def test_only_the_upright_check_rejects_lying_across(c, monkeypatch):
+    # With the upright check disabled the same pose must count as assembled; otherwise the test
+    # above would pass for an unrelated reason (the part rolling off, an unstable step, ...).
+    monkeypatch.setattr(Episode, "_upright", lambda self: True)
+    e = _lying_across(c)
+    _hold(e)
+    assert e.success and e.terminal_reason == "assembled", e.terminal_reason
+
+
+def test_lying_cases_cover_three_sizes():
+    assert {round(c.diameter * 1000) for c in LYING_ACCEPTED_BY_POSITION} == {4, 8, 12}
 
 
 @pytest.mark.parametrize("c", _one_per_part(), ids=lambda c: f"{c.shape}_{round(c.diameter * 1000)}mm")
