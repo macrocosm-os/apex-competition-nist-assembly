@@ -14,7 +14,7 @@ resources:
 # PLAYER image: serves the miner's ONNX policy over gym_v1 (player/Dockerfile).
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-nist-assembly-player
-  digest: sha256:e6ee997f9645d75294ff0ee00b69059d1a80d1c4b01337799ac0e7b893d3574a
+  digest: sha256:4ea79506a1296d79227f86689755ce15abf41c7764981113b118653e69ccfc89
 
 submission:
   artifact_type: onnx
@@ -52,7 +52,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-nist-assembly-referee
-    digest: sha256:91e9e12eba87681ad71f1fc78e1f65f4edbf6a49ef779de1fb7b5184e94bbd8a
+    digest: sha256:c57835b2da05b4cede1aa2ed584d929cc65465b8509077013a5a4c9750772c70
   timeout_s: 900
 
 signature:
