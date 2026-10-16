@@ -13,7 +13,7 @@ resources:
 
 # PLAYER image: serves the miner's ONNX policy over gym_v1 (player/Dockerfile).
 image:
-  ref: ghcr.io/unarbos/apex-competition-nist-assembly-player
+  ref: ghcr.io/macrocosm-os/apex-competition-nist-assembly-player
   digest: sha256:939f37d38948d574343b36b68ad3403657d0a5a24719b7203e6f6f8b4c83a50d
 
 submission:
@@ -51,11 +51,11 @@ entrypoints:
 referee:
   protocol: gym_v1
   image:
-    ref: ghcr.io/unarbos/apex-competition-nist-assembly-referee
+    ref: ghcr.io/macrocosm-os/apex-competition-nist-assembly-referee
     digest: sha256:7fd228b5494bdcad850506cfaa854d9eb307b5e2007b435eccb05b7a7645e675
   timeout_s: 900
 
 signature:
   # Fulcio SAN of a GitHub keyless signature is `<workflow path>@<ref>`; the platform matches it exactly.
-  cosign_identity: https://github.com/unarbos/apex-competition-nist-assembly/.github/workflows/release.yml@refs/tags/*
+  cosign_identity: https://github.com/macrocosm-os/apex-competition-nist-assembly/.github/workflows/release.yml@refs/tags/*
   cosign_issuer: https://token.actions.githubusercontent.com
